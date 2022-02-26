@@ -31,7 +31,7 @@
 
 #include <unordered_map>
 #include <iostream>
-
+#include <algorithm>
 
 /// Standard Libary Extensions developped by Erellu. See the others here https://github.com/Erellu.
 namespace ste
@@ -91,8 +91,6 @@ public:
         }
     };
 
-    using hasher          = hash_t;
-
     /// Compare operator for the key. Compares the a.first and b.first if a.first has a value,
     /// else a.second and b.second.
     struct compare_t
@@ -103,23 +101,21 @@ public:
         }
     };
 
+    using hasher          = hash_t;
     using key_equal       = compare_t;
-
 
     using map_t =  std::unordered_map<value_type, placeholder_t, hash_t, compare_t>;
 
-    using size_type       = typename map_t::size_type;
-    using difference_type = typename map_t::difference_type;
-
-    using allocator_type  = typename map_t::allocator_type;
-
+    using size_type            = typename map_t::size_type;
+    using difference_type      = typename map_t::difference_type;
+    using allocator_type       = typename map_t::allocator_type;
     using iterator             = typename map_t::iterator;
     using const_iterator       = typename map_t::const_iterator;
     using local_iterator       = typename map_t::local_iterator;
     using const_local_iterator = typename map_t::const_local_iterator;
 
     #if __cplusplus > 201402L
-    using node_type = typename map_t::node_type;
+    using node_type          = typename map_t::node_type;
     using insert_return_type = typename map_t::insert_return_type;
     #endif //__cplusplus > 201402L
 
@@ -131,14 +127,12 @@ public:
     unordered_bimap(const unordered_bimap&) = default;
     unordered_bimap(unordered_bimap&&) = default;
 
-
     explicit unordered_bimap(
           size_type buckets,
           const hasher& hash = hasher(),
           const key_equal& equal = key_equal())
     : m_data(buckets, hash, equal)
     { }
-
 
     template<typename input_iterator_t>
     unordered_bimap(
@@ -268,9 +262,24 @@ public:
         m_data.clear();
     }
 
-    void insert(const key_type& k, const T& t)
+    std::pair<iterator, bool> insert(const key_type& k, const T& t)
     {
-        m_data.insert({{k, t}, {}});
+        return m_data.insert({{k, t}, {}});
+    }
+
+    std::pair<iterator, bool> insert(const value_type& v)
+    {
+        return m_data.insert({v, {}});
+    }
+
+    std::pair<iterator, bool> insert(key_type&& k, T&& t)
+    {
+        return m_data.insert({{k, t}, {}});
+    }
+
+    iterator insert(value_type&& v)
+    {
+        return m_data.insert({v, {}});
     }
 
     void insert(std::initializer_list<value_type> list)
@@ -335,7 +344,7 @@ public:
         const_iterator it = find_value(k);
         if(it == end())
         {
-            throw std::out_of_range("No entry with such key.");
+            throw std::out_of_range("No entry with such value.");
         }
 
         return extract(it);
@@ -361,6 +370,7 @@ public:
         return m_data.erase(first, last);
     }
 
+    /// Erases the item with the key provided.
     size_type erase_key(const key_type& k)
     {
         const_iterator it = find_key(k);
@@ -373,6 +383,7 @@ public:
         return 0;
     }
 
+    /// Erases the item with the value provided.
     size_type erase_value(const mapped_type& t)
     {
         const auto it = find_value(t);
@@ -392,12 +403,34 @@ public:
         if(it != end())
         {
             erase(it);
+            insert(value_type{k, t});
+        }
+    }
+
+    void assign_value(key_type&& k, mapped_type&& t)
+    {
+        const_iterator it = find_key(k);
+        if(it != end())
+        {
+            const auto& v = (*it).first;
+            erase(it);
             insert(k, t);
         }
     }
 
     ///Sets value key. Does nothing if no value matches.
     void assign_key(const mapped_type& t, const key_type& k)
+    {
+        const_iterator it = find_value(t);
+        if(it != end())
+        {
+            erase(it);
+            insert(k, t);
+        }
+    }
+
+    ///Sets value key. Does nothing if no value matches.
+    void assign_key(mapped_type&& t, key_type&& k)
     {
         const_iterator it = find_value(t);
         if(it != end())
@@ -415,7 +448,7 @@ public:
         const auto it = find_key(k);
         if(it == end())
         {
-            throw std::out_of_range("No valid entry in unordered_bimap.");
+            throw std::out_of_range("No entry with such key.");
         }
         return (*it).first;
     }
@@ -425,19 +458,33 @@ public:
         const auto it = find_value(k);
         if(it == end())
         {
-            throw std::out_of_range("No valid entry in unordered_bimap.");
+            throw std::out_of_range("No entry with such value.");
         }
         return (*it).first;
     }
 
     const value_type& operator[](const key_type& k)
     {
-        return at(k);
+        const_iterator it = find_key(k);
+        if(it == end())
+        {
+            const auto& item_it = insert(k, T()).first;
+            return (*item_it).first;
+        }
+
+        return (*it).first;
     }
 
     const value_type& operator[](const value_type& t)
     {
-        return at(t);
+        const_iterator it = find_value(t);
+        if(it == end())
+        {
+            const auto& item_it =  insert(key_type(), t).first;
+            return (*item_it).first;
+        }
+
+        return (*it).first;
     }
 
     std::size_t count_key(const key_type& k) const
@@ -452,12 +499,24 @@ public:
 
     const_iterator find_key(const key_type& k) const
     {
-        return m_data.find({k, T()});
+        using v_t = typename map_t::value_type;
+        const auto predicate = [&](const v_t& v) -> bool
+        {
+            return v.first.first == k;
+        };
+
+        return std::find_if(m_data.begin(), m_data.end(), predicate);
     }
 
     const_iterator find_value(const mapped_type& t) const
     {
-        return m_data.find({{}, t});
+        using v_t = typename map_t::value_type;
+        const auto predicate = [&](const v_t& v) -> bool
+        {
+            return v.first.second == t;
+        };
+
+        return std::find_if(m_data.begin(), m_data.end(), predicate);
     }
 
     bool contains_key(const key_type& k) const
@@ -561,6 +620,9 @@ public:
         return out;
     }
 
+    //--------------------------------------------------------
+    // Comparison
+
     friend bool operator==(const unordered_bimap& a, const unordered_bimap& b)
     {
         return a.m_data == b.m_data;
@@ -589,6 +651,7 @@ inline typename unordered_bimap<key_t, T>::size_type erase_if(unordered_bimap<ke
     using size_type = typename unordered_bimap<key_t, T>::size_type;
 
     const size_type old_size = m.size();
+
     for (auto i = m.begin(), last = m.end(); i != last; )
     {
       if (predicate(*i))
@@ -600,6 +663,7 @@ inline typename unordered_bimap<key_t, T>::size_type erase_if(unordered_bimap<ke
         ++i;
       }
     }
+
     return old_size - m.size();
 }
 
